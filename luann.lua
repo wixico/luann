@@ -1,7 +1,7 @@
 --[[
 The MIT License (MIT)
 
-Copyright (c) <year> <copyright holders>
+Copyright (c) <2013> <Josh Rowe>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -228,7 +228,7 @@ end
 --Now we create a Network. A network is a table of layers.
 function Network:new(params)
 	if params == nil then print("No parameters detected") return end
-	structure = {learningRate = .5}
+	structure = {learningRate = .05}
 	for i = 1, #params do
 		if i == 1 then
 			structure[i] = Layer:new(params[1], params[i])
@@ -367,12 +367,24 @@ end
 
 --create a network
 myTestNetwork = Network:new({2, 3, 1})
-myTestNetwork:activate({1,1})
+--myTestNetwork:activate({1,1})
 
 --run the network through some training
-for i = 1, 1000 do
-myTestNetwork:backProp({1,1}, {0})
+for i = 1, 10000 do
+	myTestNetwork:backProp({0,0},{0})
+	myTestNetwork:backProp({1,0},{1})
+	myTestNetwork:backProp({0,1},{1})
+	myTestNetwork:backProp({1,1},{0})
 end
+
+myTestNetwork:activate({0,0})
+print("0 0 : " .. myTestNetwork[3].cells[1].signal)
+myTestNetwork:activate({0,1})
+print("1 0 : " .. myTestNetwork[3].cells[1].signal)
+myTestNetwork:activate({1,0})
+print("0 1 : " .. myTestNetwork[3].cells[1].signal)
+myTestNetwork:activate({1,1})
+print("1 1 : " .. myTestNetwork[3].cells[1].signal)
 
 --Save the network to a file
 saveNetwork(myTestNetwork, "myTestNetwork.network")
