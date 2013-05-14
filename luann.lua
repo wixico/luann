@@ -33,11 +33,7 @@ persistence =
 		if not file then return error(e)	end
 		local n = select("#", ...)
 		local objRefCount = {} -- Stores reference that will be exported
-		for i = 1, n do
-			refCount(objRefCount, (select(i,...)))
-		end
-		-- Export Objects with more than one ref and assign name
-		-- First, create empty tables for each
+		for i = 1, n do refCount(objRefCount, (select(i,...))) end
 		local objRefNames = {}
 		local objRefIdx = 0;
 		file:write("-- Persistent Data\n");
@@ -50,7 +46,6 @@ persistence =
 			end;
 		end;
 		file:write("\n} -- multiRefObjects\n");
-		-- Then fill them (this requires all empty multiRefObjects to exist)
 		for obj, idx in pairs(objRefNames) do
 			for k, v in pairs(obj) do
 				file:write("multiRefObjects["..idx.."][");
@@ -60,13 +55,11 @@ persistence =
 				file:write(";\n");
 			end;
 		end;
-		-- Create the remaining objects
 		for i = 1, n do
 			file:write("local ".."obj"..i.." = ");
 			write(file, (select(i,...)), 0, objRefNames);
 			file:write("\n");
 		end
-		-- Return them
 		if n > 0 then
 			file:write("return obj1");
 			for i = 2, n do
@@ -78,7 +71,6 @@ persistence =
 		end;
 		file:close();
 	end;
-
 	load = function (path)
 		local f, e = loadfile(path);
 		if f then
@@ -88,7 +80,6 @@ persistence =
 		end;
 	end;
 }
-
 write = function (file, item, level, objRefNames)
 	writers[type(item)](file, item, level, objRefNames);
 end;
@@ -97,7 +88,6 @@ writeIndent = function (file, level)
 		file:write("\t");
 	end;
 end;
-
 refCount = function (objRefCount, item)
 	if type(item) == "table" then
 		if objRefCount[item] then
@@ -111,7 +101,6 @@ refCount = function (objRefCount, item)
 		end;
 	end;
 end;
-
 writers = {
 	["nil"] = function (file, item) file:write("nil") end;
 	["number"] = function (file, item)
@@ -130,10 +119,8 @@ writers = {
 	["table"] = function (file, item, level, objRefNames)
 			local refIdx = objRefNames[item];
 			if refIdx then
-				-- Table with multiple references
 				file:write("multiRefObjects["..refIdx.."]");
 			else
-				-- Single use table
 				file:write("{\n");
 				for k, v in pairs(item) do
 					writeIndent(file, level+1);
@@ -148,8 +135,6 @@ writers = {
 			end;
 		end;
 	["function"] = function (file, item)
-			-- Does only work for "normal" functions, not those
-			-- with upvalues or c functions
 			local dInfo = debug.getinfo(item, "uS");
 			if dInfo.nups > 0 then
 				file:write("nil --[[functions with upvalue not supported]]");
@@ -172,12 +157,10 @@ writers = {
 		end;
 }
 
-local Network = {}
+local luann = {}
 local Layer = {}
 local Cell = {}
 local exp = math.exp
-
-math.randomseed(34580)
 
 --We start by creating the cells.
 --The cell has a structure containing weights that modify the input from the previous layer.
@@ -214,7 +197,7 @@ function Layer:new(numCells, numInputs)
 end
 
 --layers = {table of layer sizes from input to output}
-function Network:new(layers, learningRate, threshold)
+function luann:new(layers, learningRate, threshold)
 	local network = {learningRate = learningRate, threshold = threshold}
 	--initialize the input layer
 	network[1] = Layer:new(layers[1], layers[1])
@@ -227,7 +210,7 @@ function Network:new(layers, learningRate, threshold)
 	return network
 end
 
-function Network:activate(inputs)
+function luann:activate(inputs)
 	local threshold = self.threshold
 	for i = 1, #inputs do
 		self[1].cells[i].signal = inputs[i]
@@ -247,7 +230,7 @@ function Network:activate(inputs)
 	end
 end
 
-function Network:bp(inputs, outputs)
+function luann:bp(inputs, outputs)
 	self:activate(inputs) --update the internal inputs and outputs
 	local numSelf = #self
 	local learningRate = self.learningRate
@@ -279,14 +262,15 @@ function Network:bp(inputs, outputs)
 	end
 end
 
-function saveNetwork(network, savefile)
+function luann:saveNetwork(network, savefile)
+	print(savefile)
 	persistence.store(savefile, network)
 end
 
-function loadNetwork(savefile)
+function luann:loadNetwork(savefile)
 	local ann = persistence.load(savefile)
-		ann.bp = Network.bp
-		ann.activate = Network.activate
+		ann.bp = luann.bp
+		ann.activate = luann.activate
 		for i = 1, #ann do
 			for j = 1, #ann[i].cells do
 				ann[i].cells[j].activate = Cell.activate
@@ -295,7 +279,7 @@ function loadNetwork(savefile)
 	return(ann)
 end
 
-function loadTrainingDataFromFile(fileName)
+function luann:loadTrainingDataFromFile(fileName)
 local trainingData = {}
 local fileLines = {}
     local f = io.open(fileName, "rb")
@@ -316,41 +300,4 @@ local fileLines = {}
 return(trainingData)
 end
 
-learningRate = 50
-attempts = 1000
-threshold = 1
-
-myNetwork = Network:new({2,3, 1}, learningRate, threshold)
-
-print("Teaching...")
-
-input = {0,0}
-exput = {1}
-for i = 1,attempts do
-	myNetwork:bp({0,0},{0})
-	myNetwork:bp({1,0},{1})
-	myNetwork:bp({0,1},{1})
-	myNetwork:bp({1,1},{0})
-end
-
-print("Results:")
-myNetwork:activate({0,0})
-print("0 0 | " .. myNetwork[3].cells[1].signal)
-myNetwork:activate({0,1})
-print("0 0 | " .. myNetwork[3].cells[1].signal)
-myNetwork:activate({1,0})
-print("0 0 | " .. myNetwork[3].cells[1].signal)
-myNetwork:activate({1,1})
-print("0 0 | " .. myNetwork[3].cells[1].signal)
-
---Save the network to a file
-saveNetwork(myNetwork, "myTestNetwork.network")
-
---Load the network from a file
-newNetwork = loadNetwork("myTestNetwork.network")
-
---train the loaded network
-newNetwork:bp({1,1}, {0})
-
---test the output of the loaded network
-print(newNetwork[3].cells[1].signal)
+return(luann)
