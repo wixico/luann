@@ -23,24 +23,22 @@ THE SOFTWARE.
 
 ]]--
 
+--Borrowed table persistence from http://lua-users.org/wiki/TablePersistence, MIT license.
+--comments removed, condensed code to oneliners where possible.
 local write, writeIndent, writers, refCount;
-
 persistence =
 {
 	store = function (path, ...)
-		local file, e = io.open(path, "w");
-		if not file then
-			return error(e);
-		end
-		local n = select("#", ...);
-		-- Count references
-		local objRefCount = {}; -- Stores reference that will be exported
+		local file, e = io.open(path, "w")
+		if not file then return error(e)	end
+		local n = select("#", ...)
+		local objRefCount = {} -- Stores reference that will be exported
 		for i = 1, n do
-			refCount(objRefCount, (select(i,...)));
-		end;
+			refCount(objRefCount, (select(i,...)))
+		end
 		-- Export Objects with more than one ref and assign name
 		-- First, create empty tables for each
-		local objRefNames = {};
+		local objRefNames = {}
 		local objRefIdx = 0;
 		file:write("-- Persistent Data\n");
 		file:write("local multiRefObjects = {\n");
@@ -115,9 +113,7 @@ refCount = function (objRefCount, item)
 end;
 
 writers = {
-	["nil"] = function (file, item)
-			file:write("nil");
-		end;
+	["nil"] = function (file, item) file:write("nil") end;
 	["number"] = function (file, item)
 			file:write(tostring(item));
 		end;
@@ -176,112 +172,111 @@ writers = {
 		end;
 }
 
-math.randomseed(os.time())
 local Network = {}
 local Layer = {}
 local Cell = {}
 local exp = math.exp
 
-function sigmoid(input, threshold)
-	if not(threshold) then threshold = 1 end
-	out = 1 / (1 + math.exp((input*-1) / threshold))
-	return(out)
-end
+math.randomseed(34580)
 
-function sum(a,b)
-	local sum = 0
-	local len = #a
-		for i = 1, len do sum = sum + (a[i]*b[i]) end
-	return sum
-end
-
---We start by creating the cells, or neurons. The cell has a structure containing weights that modify the input from the previous layer.
+--We start by creating the cells.
+--The cell has a structure containing weights that modify the input from the previous layer.
 --Each cell also has a signal, or output.
-function Cell:new(numInputs, structure)
-	structure = structure or {delta = 0, weights = {}, signal = 0}
+function Cell:new(numInputs)
+	local cell = {delta = 0, weights = {}, signal = 0}
 		for i = 1, numInputs do
-			structure.weights[i] = math.random() * .1
-			if math.random(1,2) == 2 then structure.weights[i] = structure.weights[i] * -1 end
+			cell.weights[i] = math.random() * .1
 		end
-		setmetatable(structure, self)
+		setmetatable(cell, self)
 		self.__index = self
-	return structure
+	return cell
 end
 
---The neuron has an activation function; in this case, the squashed sigmoid sum of all inputs.
-function Cell:activate(inputs)
-		self.signal = 1 / (1 + exp((sum(self.weights, inputs)*-1) / 1))
+function Cell:activate(inputs, bias, threshold)
+		local signalSum = bias
+		local weights = self.weights
+		for i = 1, #weights do
+			signalSum = signalSum + (weights[i] * inputs[i])
+		end
+	self.signal = 1 / (1 + exp((signalSum * -1) / threshold))
 end
 
---Next we create a Layer of cells. The layer is a table of neurons.
-function Layer:new(numCells, numInputs, structure)
+--Next we create a Layer of cells. The layer is a table of cells.
+function Layer:new(numCells, numInputs)
 	numCells = numCells or 1
 	numInputs = numInputs or 1
-	cells = {}
+	local cells = {}
 		for i = 1, numCells do cells[i] = Cell:new(numInputs) end
-		structure = structure or {bias = 1, cells = cells}
-		setmetatable(structure, self)
+		local layer = {cells = cells, bias = math.random()}
+		setmetatable(layer, self)
 		self.__index = self
-	return structure
+	return layer
 end
 
---Now we create a Network. A network is a table of layers.
-function Network:new(params)
-	if params == nil then print("No parameters detected") return end
-	structure = {learningRate = .05}
-	for i = 1, #params do
-		if i == 1 then
-			structure[i] = Layer:new(params[1], params[i])
-		else
-			structure[i] = Layer:new(params[i], params[i-1])
-		end
+--layers = {table of layer sizes from input to output}
+function Network:new(layers, learningRate, threshold)
+	local network = {learningRate = learningRate, threshold = threshold}
+	--initialize the input layer
+	network[1] = Layer:new(layers[1], layers[1])
+	--initialize the hidden layers and output layer
+	for i = 2, #layers do
+		network[i] = Layer:new(layers[i], layers[i-1])
 	end
-	setmetatable(structure, self)
+	setmetatable(network, self)
 	self.__index = self
-	return structure
+	return network
 end
 
---accepts a table of inputs, causes all cells in the network to update their signal
 function Network:activate(inputs)
-	local passInputs = {}
-	for i = 1, #self do
-		for keys,values in pairs(passInputs) do passInputs[keys] = nil end
-		if i >= 2 then for k = 1, #self[i-1].cells do passInputs[k] = self[i-1].cells[k].signal end end
-		for j = 1, #self[i].cells do
-			if i == 1 then self[i].cells[j]:activate(inputs) end
-			if i >= 2 then self[i].cells[j]:activate(passInputs) end
+	local threshold = self.threshold
+	for i = 1, #inputs do
+		self[1].cells[i].signal = inputs[i]
+	end
+	for i = 2, #self do
+		local passInputs = {}
+		local cells = self[i].cells
+		local prevCells = self[i-1].cells
+		for m = 1, #prevCells do
+			passInputs[m] = prevCells[m].signal
+		end
+		local passBias = self[i].bias
+		for j = 1, #cells do
+			--activate each cell
+			cells[j]:activate(passInputs, passBias, threshold)
 		end
 	end
 end
 
-function Network:backProp(inputs, outputs)
-	self:activate(inputs) --update the signal for each cell
-	--iterate over each layer
-		for i = #self, 2, -1 do
-			--iterate over each cell in each layer
-			for cellIndex, cell in ipairs(self[i].cells) do
-				--update the deltas of the first layer
-				local signal = cell.signal
-				if i == #self then
-					cell.delta = ((outputs[cellIndex] - signal) * signal * (1 - signal))
-				else
-				--initialize weightDelta
-				local delta = 0
-						for nextCellIndex, nextCell in ipairs(self[i + 1].cells) do
-							delta = delta + (nextCell.weights[cellIndex] * nextCell.delta)
-						end
-					cell.delta = signal * (1 - signal) * delta
+function Network:bp(inputs, outputs)
+	self:activate(inputs) --update the internal inputs and outputs
+	local numSelf = #self
+	local learningRate = self.learningRate
+	for i = numSelf, 2, -1 do --iterate backwards (nothing to calculate for input layer)
+		local numCells = #self[i].cells
+		local cells = self[i].cells
+		for j = 1, numCells do
+			local signal = cells[j].signal
+			if i ~= numSelf then --special calculations for output layer
+				local weightDelta = 0
+				local layer = self[i+1].cells
+				for k = 1, #self[i+1].cells do
+					weightDelta = weightDelta + layer[k].weights[j] * layer[k].delta
 				end
+				cells[j].delta = signal * (1 - signal) * weightDelta
+			else
+				cells[j].delta = (outputs[j] - signal) * signal * (1 - signal)
 			end
 		end
-
-		for i = 2, #self do
-			for j = 1, #self[i].cells do
-				for k = 1, #self[i].cells[j].weights do
-						self[i].cells[j].weights[k] = self[i].cells[j].weights[k] + self[i].cells[j].delta * self.learningRate * self[i-1].cells[k].signal
-				end
+	end
+	for i = 2, numSelf do
+		self[i].bias = self[i].cells[#self[i].cells].delta * learningRate
+		for j = 1, #self[i].cells do
+			for k = 1, #self[i].cells[j].weights do
+				local weights = self[i].cells[j].weights
+				weights[k] = weights[k] + self[i].cells[j].delta * learningRate * self[i-1].cells[k].signal
 			end
 		end
+	end
 end
 
 function saveNetwork(network, savefile)
@@ -289,16 +284,15 @@ function saveNetwork(network, savefile)
 end
 
 function loadNetwork(savefile)
-	local network = persistence.load(savefile)
-		network.backProp = Network.backProp
-		network.activate = Network.activate
-
-		for i = 1, #network do
-			for j = 1, #network[i].cells do
-				network[i].cells[j].activate = Cell.activate
+	local ann = persistence.load(savefile)
+		ann.bp = Network.bp
+		ann.activate = Network.activate
+		for i = 1, #ann do
+			for j = 1, #ann[i].cells do
+				ann[i].cells[j].activate = Cell.activate
 			end
 		end
-	return(network)
+	return(ann)
 end
 
 function loadTrainingDataFromFile(fileName)
@@ -322,80 +316,41 @@ local fileLines = {}
 return(trainingData)
 end
 
+learningRate = 50
+attempts = 1000
+threshold = 1
 
-function Network:train(trainingData, testData, numCycles, numTests, targetError, cyclesBetweenReports)
-	--the trainingData format is as follows: trainingData[1][1] = table of inputs , trainingData[1][2] = table of outputs
-	--testData is in the same form. testData is used to measure the accuracy of the outputs of the network.
-	--if the MSE of the collected outputs is higher than targetError, training continues.
-	--if the MSE of the outputs is lower, training stops and the network is saved
-	--if there is more training data than the number of cycles, only do the first numCycles number of i/o pairs
-	for i = 1,  numCycles do
-		local meanSquaredError = 0
-			self:backProp(trainingData[i][1], trainingData[i][2])
-			--every cyclesBetweenReports cycles, report the current status.
-			if i%cyclesBetweenReports == 0 then
-				--print a report of current network status
-				--use the first numTests number of i/o pairs to get estimate
-				local MSE = {}
-				for j = 1, numTests do
-					self:activate(trainingData[i][1])
-					--get array of outputs
-					local outputs = {}
-					for k = 1, #self[#self].cells do
-						table.insert(outputs, self[#self].cells.signal)
-					end
-					--get the squared error for each pair in outputs and trainingData[i][2]
-					for l = 1, #outputs do
-						local squaredError = (trainingData[i][2][l] - outputs[l])^2
-						table.insert(MSE, squaredError)
-					end
+myNetwork = Network:new({2,3, 1}, learningRate, threshold)
 
-					--get the mean of the squared error of all outputs
-					for m = 1, #MSE do
-						meanSquaredError = meanSquaredError + MSE[m]
-					end
-					meanSquaredError = meanSquaredError / #MSE
-					print("Mean Squared Error = " .. meanSquaredError)
-				end
-			end
-		if meanSquaredError <= targetError then break end
-	end
-	--training is concluded when numCycles or MSE is lower than targetError
+print("Teaching...")
+
+input = {0,0}
+exput = {1}
+for i = 1,attempts do
+	myNetwork:bp({0,0},{0})
+	myNetwork:bp({1,0},{1})
+	myNetwork:bp({0,1},{1})
+	myNetwork:bp({1,1},{0})
 end
 
-
-
---create a network
-myTestNetwork = Network:new({2, 3, 1})
---myTestNetwork:activate({1,1})
-
---run the network through some training
-for i = 1, 10000 do
-	myTestNetwork:backProp({0,0},{0})
-	myTestNetwork:backProp({1,0},{1})
-	myTestNetwork:backProp({0,1},{1})
-	myTestNetwork:backProp({1,1},{0})
-end
-
-myTestNetwork:activate({0,0})
-print("0 0 : " .. myTestNetwork[3].cells[1].signal)
-myTestNetwork:activate({0,1})
-print("1 0 : " .. myTestNetwork[3].cells[1].signal)
-myTestNetwork:activate({1,0})
-print("0 1 : " .. myTestNetwork[3].cells[1].signal)
-myTestNetwork:activate({1,1})
-print("1 1 : " .. myTestNetwork[3].cells[1].signal)
+print("Results:")
+myNetwork:activate({0,0})
+print("0 0 | " .. myNetwork[3].cells[1].signal)
+myNetwork:activate({0,1})
+print("0 0 | " .. myNetwork[3].cells[1].signal)
+myNetwork:activate({1,0})
+print("0 0 | " .. myNetwork[3].cells[1].signal)
+myNetwork:activate({1,1})
+print("0 0 | " .. myNetwork[3].cells[1].signal)
 
 --Save the network to a file
-saveNetwork(myTestNetwork, "myTestNetwork.network")
+saveNetwork(myNetwork, "myTestNetwork.network")
 
 --Load the network from a file
 newNetwork = loadNetwork("myTestNetwork.network")
 
 --train the loaded network
-newNetwork:backProp({1,1}, {0})
+newNetwork:bp({1,1}, {0})
 
 --test the output of the loaded network
 print(newNetwork[3].cells[1].signal)
-
-
